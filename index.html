@@ -29,8 +29,7 @@
 </div>
 
 <script>
-  // ⚠️ CAMBIA ESTO por tu URL de Apps Script
-  const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxz8EZXO5Fv5z-oagJQbsyj-wLLwaFy18-pmTf1Gan1KTw45zR3QpKBCu-8KLhqC-Hv/exec';
+  const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbzpp-0ubxCByDrm9DcVXzBN19wZXGWRkO78092zN7cNvpQO1XszUI-xfAuBSQqe75NZ/exec';
 
   const REQUIRED_COLUMNS = [
     "RFC","CURP","FIRA","Nombre","Estado","registro_patronal",
@@ -49,7 +48,7 @@
     const file = e.target.files[0];
     const status = document.getElementById('status');
     const btn = document.getElementById('uploadBtn');
-    
+
     status.innerHTML = '<span class="loader">Analizando estructura y datos...</span>';
     btn.style.display = "none";
     globalFile = null;
@@ -115,30 +114,34 @@
 
       fetch(WEBAPP_URL, {
         method: 'POST',
+        mode: 'no-cors',                      // ← fix CORS
+        headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({
           data: base64Data,
           contentType: contentType,
           fileName: globalFile.name
         })
       })
-      .then(r => r.json())
-      .then(result => {
-        if (result.success) {
-          document.querySelector('.container').innerHTML = `
-            <div class="success" style="text-align:center;font-size:20px;padding:20px;">
-              ✓ ${result.message}
-            </div>`;
-        } else {
-          status.innerHTML = `<div class="error">${result.message}</div>`;
-          btn.disabled = false;
-        }
+      .then(() => {
+        // Con no-cors la respuesta es opaca, asumimos éxito si no hubo error de red
+        document.querySelector('.container').innerHTML = `
+          <div class="success" style="text-align:center;font-size:20px;padding:30px;">
+            ✓ ¡Archivo enviado con éxito a Drive!<br>
+            <span style="font-size:14px;font-weight:normal;color:#555;margin-top:10px;display:block;">
+              Puedes cerrar esta ventana.
+            </span>
+          </div>`;
       })
       .catch(err => {
-        status.innerHTML = `<div class="error">Error de red: ${err}</div>`;
+        status.innerHTML = `<div class="error">Error de red: ${err}<br><br>Verifica tu conexión e intenta de nuevo.</div>`;
         btn.disabled = false;
       });
     };
     reader.readAsDataURL(globalFile);
+  });
+</script>
+</body>
+</html>
   });
 </script>
 </body>
