@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; padding: 20px; background: #f4f7f6; }
+    .container { max-width: 600px; margin: auto; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    h3 { color: #2c3e50; border-bottom: 2px solid #27ae60; padding-bottom: 10px; margin-bottom: 15px; }
+    input[type="file"] { margin: 15px 0; width: 100%; }
+    #status { margin-top: 15px; font-size: 0.9em; line-height: 1.6em; }
+    .error { color: #c0392b; background: #f9ebea; padding: 10px; border-radius: 4px; border-left: 5px solid #c0392b; white-space: pre-wrap; }
+    .success { color: #27ae60; font-weight: bold; }
+    .loader { color: #7f8c8d; font-style: italic; }
+    button { background: #27ae60; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; display: none; font-size: 16px; width: 100%; margin-top: 10px; }
+    button:hover { background: #219150; }
+    button:disabled { background: #95a5a6; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+<div class="container">
+  <h3>Validación de Archivo Acreditados</h3>
+  <p>Seleccione su archivo Excel o CSV para verificar los requisitos de FIRA.</p>
+  <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" />
+  <div id="status"></div>
+  <button id="uploadBtn">Enviar Archivo Validado</button>
+</div>
+
+<script>
+  // ⚠️ CAMBIA ESTO por tu URL de Apps Script
+  const WEBAPP_URL = 'https://script.google.com/macros/s/TU_ID_AQUI/exec';
+
+  const REQUIRED_COLUMNS = [
+    "RFC","CURP","FIRA","Nombre","Estado","registro_patronal",
+    "fecha_corte_financiero","fecha_ult_cred","ingresos_año_t-1",
+    "activos_tot_año_ t-1","pasivos_año_t-1","pasivos_año_t",
+    "valor_colateral_real","tipo_colateral","tipo_colateral_desc",
+    "prob_incum","score interno","score_buro","fecha_modelo_riesgo",
+    "email","teléfono","direccion_estado","direccion_municipio",
+    "direccion_localidad","direccion_codigo_postal","direccion_calle",
+    "direccion_numero_externo","referencias_geograficas"
+  ];
+
+  let globalFile = null;
+
+  document.getElementById('fileInput').addEventListener('change', function(e) {
+    const file = e.target.files[0];
+    const status = document.getElementById('status');
+    const btn = document.getElementById('uploadBtn');
+    
+    status.innerHTML = '<span class="loader">Analizando estructura y datos...</span>';
+    btn.style.display = "none";
+    globalFile = null;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+        const headers = XLSX.utils.sheet_to_json(firstSheet, { header: 1 })[0];
+
+        let errors = [];
+
+        REQUIRED_COLUMNS.forEach(col => {
+          if (!headers || !headers.includes(col)) {
+            errors.push(`Falta la columna obligatoria: "${col}"`);
+          }
+        });
+
+        jsonData.forEach((row, index) => {
+          const rowNum = index + 2;
+          if (row.registro_patronal && row.registro_patronal !== "NA") {
+            if (!/^[A-Z]\d{2}-\d{5}-\d{2}-\d$/.test(row.registro_patronal)) {
+              errors.push(`Fila ${rowNum}: registro_patronal formato incorrecto.`);
+            }
+          }
+          if (row.score_buro && (row.score_buro < 450 || row.score_buro > 800)) {
+            errors.push(`Fila ${rowNum}: score_buro fuera de rango (450-800).`);
+          }
+          if (row.prob_incum !== undefined && (row.prob_incum < 0 || row.prob_incum > 1)) {
+            errors.push(`Fila ${rowNum}: prob_incum debe ser decimal entre 0 y 1.`);
+          }
+        });
+
+        if (errors.length > 0) {
+          status.innerHTML = `<div class="error"><b>Errores encontrados (${errors.length}):</b>\n${errors.slice(0, 10).join('\n')}${errors.length > 10 ? '\n...y más errores.' : ''}</div>`;
+        } else {
+          status.innerHTML = `<div class="success">✓ El archivo cumple con todas las reglas de FIRA.</div>`;
+          btn.style.display = "block";
+          globalFile = file;
+        }
+      } catch (err) {
+        status.innerHTML = `<div class="error">Error al leer el archivo. Verifique que no esté dañado o protegido.</div>`;
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  });
+
+  document.getElementById('uploadBtn').addEventListener('click', function() {
+    if (!globalFile) return;
+    const btn = document.getElementById('uploadBtn');
+    const status = document.getElementById('status');
+    btn.disabled = true;
+    status.innerHTML = '<span class="loader">Subiendo archivo a Drive...</span>';
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const fullData = e.target.result;
+      const contentType = fullData.substring(5, fullData.indexOf(';'));
+      const base64Data = fullData.substring(fullData.indexOf('base64,') + 7);
+
+      fetch(WEBAPP_URL, {
+        method: 'POST',
+        body: JSON.stringify({
+          data: base64Data,
+          contentType: contentType,
+          fileName: globalFile.name
+        })
+      })
+      .then(r => r.json())
+      .then(result => {
+        if (result.success) {
+          document.querySelector('.container').innerHTML = `
+            <div class="success" style="text-align:center;font-size:20px;padding:20px;">
+              ✓ ${result.message}
+            </div>`;
+        } else {
+          status.innerHTML = `<div class="error">${result.message}</div>`;
+          btn.disabled = false;
+        }
+      })
+      .catch(err => {
+        status.innerHTML = `<div class="error">Error de red: ${err}</div>`;
+        btn.disabled = false;
+      });
+    };
+    reader.readAsDataURL(globalFile);
+  });
+</script>
+</body>
+</html>
